@@ -1,0 +1,11 @@
+{
+  "name": "settleproof",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SettleProof: proof-gated agent payments. An agent holds a buyer's payment under a written mandate and releases it only when delivery proof checks out (SAM 3.1 counts the items, Muse Spark explains the decision, every decision lands in a tamper-evident receipt chain).",
+  "scripts": {
+    "start": "node src/server.js",
+    "selftest": "node scripts/selftest.mjs"
+  }
+}

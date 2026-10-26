@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SettleProof — the payment agent that shows its work</title>
+<style>
+  :root {
+    --ink: #10243e;
+    --muted: #5b6b82;
+    --gold: #c9a227;
+    --green: #1d9e6c;
+    --red: #d64545;
+    --card: #ffffff;
+    --bg: #eef2f7;
+    --line: #d8e0ea;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: var(--ink); color: #fff; padding: 18px 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header .logo { font-size: 26px; font-weight: 800; letter-spacing: 0.3px; }
+  header .logo span { color: var(--gold); }
+  header .tag { color: #c7d3e4; font-size: 14px; }
+  #chainPill { margin-left: auto; font-size: 13px; font-weight: 700; padding: 6px 12px; border-radius: 999px; background: #17365c; color: #9fe8c6; border: 1px solid #2c4f7d; }
+  #chainPill.broken { color: #ffb3b3; border-color: #7d2c2c; background: #4a1d1d; }
+  .persona { background: #fff; border-bottom: 1px solid var(--line); padding: 12px 28px; font-size: 15px; color: var(--muted); }
+  .persona strong { color: var(--ink); }
+  main { display: grid; grid-template-columns: 320px 1fr 340px; gap: 18px; padding: 20px 28px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: 0 1px 3px rgba(16,36,62,0.06); }
+  .card h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .kv { display: flex; justify-content: space-between; font-size: 14px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
+  .kv:last-child { border-bottom: none; }
+  .steps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  .step { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px; background: #e6ecf3; color: var(--muted); }
+  .step.on { background: var(--ink); color: #fff; }
+  .step.done { background: var(--green); color: #fff; }
+  button { cursor: pointer; border: none; border-radius: 10px; font-weight: 700; font-size: 14px; padding: 11px 14px; }
+  .scenario { display: block; width: 100%; text-align: left; margin-bottom: 10px; background: #f2f6fb; border: 1px solid var(--line); color: var(--ink); }
+  .scenario:hover { border-color: var(--gold); }
+  .scenario small { display: block; font-weight: 400; color: var(--muted); margin-top: 3px; }
+  .primary { background: var(--green); color: #fff; width: 100%; font-size: 16px; padding: 14px; }
+  .primary:disabled { background: #b9c6d4; cursor: not-allowed; }
+  .danger { background: #fff; color: var(--red); border: 1px solid var(--red); }
+  .ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+  .evidence-wrap { position: relative; width: 100%; background: #0d1b2e; border-radius: 10px; overflow: hidden; min-height: 240px; }
+  .evidence-wrap img { width: 100%; display: block; }
+  .evidence-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .empty-note { color: #c7d3e4; padding: 60px 20px; text-align: center; font-size: 15px; }
+  .count-row { display: flex; align-items: baseline; gap: 14px; margin-top: 14px; }
+  .count-big { font-size: 54px; font-weight: 800; line-height: 1; }
+  .count-sub { color: var(--muted); font-size: 14px; }
+  .moneybar { display: flex; height: 38px; border-radius: 9px; overflow: hidden; margin-top: 12px; border: 1px solid var(--line); }
+  .moneybar .rel { background: var(--green); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; transition: width 0.7s ease; }
+  .moneybar .held { background: var(--red); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; transition: width 0.7s ease; }
+  .badge { display: inline-block; font-weight: 800; font-size: 13px; padding: 5px 11px; border-radius: 999px; color: #fff; background: var(--muted); }
+  .badge.release { background: var(--green); }
+  .badge.partial-hold { background: #e08a00; }
+  .badge.hold { background: var(--red); }
+  .explain { font-size: 15px; line-height: 1.5; background: #f7fafc; border-left: 4px solid var(--gold); padding: 12px 14px; border-radius: 0 10px 10px 0; margin: 12px 0; }
+  .override { font-size: 13px; color: var(--red); font-weight: 700; }
+  .settle { font-size: 14px; background: #eafaf2; border: 1px solid #bfe9d4; border-radius: 10px; padding: 12px 14px; margin-top: 12px; display: none; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .mono { font-family: Consolas, monospace; font-size: 11px; word-break: break-all; }
+  .row-broken td { background: #fdecec; }
+  footer { padding: 16px 28px 30px; color: var(--muted); font-size: 13px; max-width: 1500px; margin: 0 auto; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Settle<span>Proof</span></div>
+  <div class="tag">Proof-gated agent payments. It checks the delivery before it pays, and shows its work.</div>
+  <div id="chainPill">Receipt chain: checking…</div>
+</header>
+<div class="persona">
+  <strong>Maya sells boxed skincare sets.</strong> Her marketplace holds every payout for up to 14 days while disputes crawl.
+  SettleProof holds the buyer's payment under a written mandate, counts what actually shipped with SAM 3.1, and releases in minutes, with a receipt for every step.
+</div>
+<main>
+  <section class="card">
+    <h2>The order</h2>
+    <div class="kv"><span>Order</span><strong id="ordId">not created yet</strong></div>
+    <div class="kv"><span>Buyer</span><strong>Alex R.</strong></div>
+    <div class="kv"><span>Seller</span><strong>Maya, Northlight Goods</strong></div>
+    <div class="kv"><span>Item</span><strong>White product box × 10</strong></div>
+    <div class="kv"><span>Unit price</span><strong>$12.00</strong></div>
+    <div class="kv"><span>Escrow total</span><strong>$120.00</strong></div>
+    <div class="steps">
+      <div class="step" id="st-funded">Funded</div>
+      <div class="step" id="st-evidence">Evidence</div>
+      <div class="step" id="st-decided">Decision</div>
+      <div class="step" id="st-settled">Settled</div>
+    </div>
+    <h2 style="margin-top:22px;">Run a delivery</h2>
+    <button class="scenario" data-asset="real-ten.jpg">Clean delivery
+      <small>The seller ships all 10 boxes. Expect a full release.</small></button>
+    <button class="scenario" data-asset="real-nine.jpg">Short shipment
+      <small>One box is missing from the photo. Expect 90% released, 10% held.</small></button>
+    <button class="scenario" id="uploadBtn">Upload a delivery photo
+      <small>Your own photo. SAM counts the white product boxes it finds.</small></button>
+    <input type="file" id="fileInput" accept="image/*" style="display:none">
+    <p style="font-size:13px;color:var(--muted);line-height:1.5;">Every run writes its steps into the tamper-evident receipt chain on the right. Nothing settles until a human approves.</p>
+  </section>
+
+  <section class="card">
+    <h2>Delivery evidence</h2>
+    <div class="evidence-wrap" id="evidenceWrap">
+      <div class="empty-note" id="emptyNote">Run a delivery to see SAM 3.1 count the shipment.</div>
+      <img id="evidenceImg" style="display:none" alt="Delivery photo">
+      <canvas id="overlay"></canvas>
+    </div>
+    <div class="count-row">
+      <div class="count-big" id="countBig">– / 10</div>
+      <div class="count-sub">items verified by SAM 3.1 segmentation.<br>The count is law: it, not the language model, sets the release.</div>
+    </div>
+    <div class="moneybar">
+      <div class="rel" id="barRel" style="width:0%"></div>
+      <div class="held" id="barHeld" style="width:0%"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:6px;">
+      <span id="relLabel">Released: $0.00</span><span id="heldLabel">Held: $0.00</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Decision</h2>
+    <div id="decisionBody">
+      <p style="color:var(--muted);font-size:14px;line-height:1.5;">No decision yet. When evidence arrives, Muse Spark reads the mandate, SAM 3.1 counts the items, and the agent explains its call here.</p>
+    </div>
+    <button class="primary" id="approveBtn" disabled>Human approval: settle</button>
+    <div class="settle" id="settleBox"></div>
+    <h2 style="margin-top:22px;">Receipts</h2>
+    <div style="max-height:300px;overflow:auto;">
+      <table>
+        <thead><tr><th>#</th><th>Step</th><th>Detail</th></tr></thead>
+        <tbody id="receiptRows"><tr><td colspan="3" style="color:var(--muted);">Receipts appear here.</td></tr></tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:14px;">
+      <button class="danger" id="tamperBtn">Tamper test: edit a past receipt</button>
+      <button class="ghost" id="resetBtn">Reset demo</button>
+    </div>
+    <p style="font-size:13px;color:var(--muted);line-height:1.5;">The tamper test rewrites history on purpose. Watch the chain status at the top: verification breaks at the edited receipt, and the log can no longer be trusted.</p>
+  </section>
+</main>
+<footer>SettleProof demo. Synthetic order, test value only, settlement shown on a mock rail. Built with Muse Spark and SAM 3.1 on the Meta Model API for the Meta Global AI Developer Hackathon.</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentOrder = null;
+let currentDecision = null;
+
+async function api(path, body) {
+  const resp = await fetch(path, {
+    method: body ? "POST" : "GET",
+    headers: { "content-type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await resp.json();
+  if (!resp.ok) throw new Error(json.error || ("HTTP " + resp.status));
+  return json;
+}
+
+async function refreshChain() {
+  const h = await api("/health");
+  const pill = $("chainPill");
+  if (h.chain.ok) {
+    pill.textContent = "Receipt chain: valid (" + h.chain.length + " receipts)";
+    pill.classList.remove("broken");
+  } else {
+    pill.textContent = "Receipt chain: BROKEN at receipt " + h.chain.brokenAt;
+    pill.classList.add("broken");
+  }
+}
+
+function setStep(id, cls) { $(id).className = "step " + cls; }
+
+function assetDataUri(path) {
+  return fetch(path).then(r => r.blob()).then(blob => new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(blob);
+  }));
+}
+
+function drawOverlay(boxes) {
+  const img = $("evidenceImg");
+  const canvas = $("overlay");
+  const wrap = $("evidenceWrap");
+  canvas.width = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!boxes.length) return;
+  const refW = boxes[0].w, refH = boxes[0].h;
+  const sx = img.clientWidth / refW, sy = img.clientHeight / refH;
+  const sorted = [...boxes].sort((a, b) => (Math.floor(a.y1 / 80) - Math.floor(b.y1 / 80)) || (a.x1 - b.x1));
+  sorted.forEach((b, i) => {
+    const x = b.x1 * sx, y = b.y1 * sy, w = (b.x2 - b.x1) * sx, h = (b.y2 - b.y1) * sy;
+    ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 3;
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = "#ff3b30";
+    ctx.fillRect(x, y, 30, 30);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 19px sans-serif";
+    ctx.fillText(String(i + 1), x + 8, y + 22);
+  });
+}
+
+function renderDecision(decision) {
+  currentDecision = decision;
+  const f = decision.final;
+  $("countBig").textContent = decision.samCount + " / 10";
+  $("barRel").style.width = f.releasePct + "%";
+  $("barRel").textContent = f.releasePct > 12 ? "$" + f.releaseAmount.toFixed(2) : "";
+  $("barHeld").style.width = (100 - f.releasePct) + "%";
+  $("barHeld").textContent = f.releasePct < 88 ? "$" + f.heldAmount.toFixed(2) : "";
+  $("relLabel").textContent = "Released: $" + f.releaseAmount.toFixed(2) + " (" + f.releasePct + "%)";
+  $("heldLabel").textContent = "Held: $" + f.heldAmount.toFixed(2) + " (" + (100 - f.releasePct) + "%)";
+  const badgeText = f.decision === "release" ? "RELEASE IN FULL" : f.decision === "partial-hold" ? "PARTIAL HOLD" : "HOLD ALL";
+  $("decisionBody").innerHTML =
+    '<span class="badge ' + f.decision + '">' + badgeText + "</span>" +
+    '<div class="explain">' + decision.explanation + "</div>" +
+    (decision.overCount > 0 ? '<div class="override" style="color:#b97a00;">Over-count flagged: SAM found ' + decision.samCount + ' items against a mandate of 10. Release capped at 100% and the surplus is recorded in the receipts for the approver.</div>' : "") +
+    (decision.engineOverride ? '<div class="override">The language model proposed a different outcome. The verified SAM count overruled it, and the override is in the receipts.</div>' : "") +
+    '<p style="font-size:13px;color:var(--muted);">Decided by the mandate band from the SAM 3.1 count, explained by Muse Spark. Awaiting human approval.</p>';
+  $("approveBtn").disabled = false;
+  setStep("st-evidence", "done");
+  setStep("st-decided", "on");
+}
+
+async function renderReceipts() {
+  if (!currentOrder) return;
+  const o = await api("/orders/" + currentOrder);
+  const rows = o.receipts.map(r => {
+    let detail = "";
+    if (r.kind === "decision") detail = r.data.decision + " at " + r.data.releasePct + "% · SAM " + r.data.samCount + "/" + r.data.expectedCount;
+    else if (r.kind === "approved-and-settled") detail = "released $" + r.data.releasedAmount + " · held $" + r.data.heldAmount;
+    else if (r.kind === "funded") detail = "$" + r.data.amount + " " + r.data.currency;
+    else if (r.kind === "evidence-submitted") detail = "photo sha256 " + String(r.data.evidence.sha256).slice(0, 12) + "…";
+    else if (r.kind === "mandate-created") detail = r.data.expectedCount + " × " + r.data.concept;
+    return "<tr><td>" + r.seq + "</td><td>" + r.kind + "</td><td>" + detail + '</td></tr>';
+  }).join("");
+  $("receiptRows").innerHTML = rows || '<tr><td colspan="3">None yet.</td></tr>';
+  await refreshChain();
+}
+
+async function runWithDataUri(dataUri) {
+  const order = await api("/orders", {
+    buyer: "Alex R.", seller: "Maya, Northlight Goods",
+    concept: "white product box", expectedCount: 10, totalAmount: 120,
+  });
+  currentOrder = order.mandate.id;
+  $("ordId").textContent = currentOrder;
+  setStep("st-funded", "done");
+  const img = $("evidenceImg");
+  img.src = dataUri;
+  img.style.display = "block";
+  $("emptyNote").style.display = "none";
+  await new Promise(r => { img.onload = r; });
+  const out = await api("/orders/" + currentOrder + "/evidence", { imageDataUri: dataUri });
+  drawOverlay(out.decision.samBoxes || []);
+  renderDecision(out.decision);
+  await renderReceipts();
+}
+
+document.querySelectorAll(".scenario[data-asset]").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    try {
+      const uri = await assetDataUri("/assets/" + btn.dataset.asset);
+      await runWithDataUri(uri);
+    } catch (e) { alert("Run failed: " + e.message); }
+  });
+});
+
+$("uploadBtn").addEventListener("click", () => $("fileInput").click());
+$("fileInput").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const uri = await new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(file);
+  });
+  try { await runWithDataUri(uri); } catch (e) { alert("Run failed: " + e.message); }
+});
+
+$("approveBtn").addEventListener("click", async () => {
+  try {
+    const out = await api("/orders/" + currentOrder + "/approve", { approver: "ops-human (demo)" });
+    const box = $("settleBox");
+    box.style.display = "block";
+    box.innerHTML = "<strong>Settled.</strong> Released $" + out.settlement.releasedAmount.toFixed(2) +
+      " to Maya" + (out.settlement.heldAmount > 0 ? ", holding $" + out.settlement.heldAmount.toFixed(2) + " until the missing item ships" : "") +
+      ".<br><span class='mono'>rail ref: " + (out.settlement.txRef || "none (full hold)") + "</span>";
+    $("approveBtn").disabled = true;
+    setStep("st-decided", "done");
+    setStep("st-settled", "done");
+    await renderReceipts();
+  } catch (e) { alert("Approve failed: " + e.message); }
+});
+
+$("tamperBtn").addEventListener("click", async () => {
+  try {
+    const out = await api("/demo/tamper", {});
+    await renderReceipts();
+    if (!out.verify.ok) {
+      $("receiptRows").innerHTML += '<tr class="row-broken"><td colspan="3"><strong>Chain verification failed at receipt ' + out.verify.brokenAt + ".</strong> A past decision was edited (releasePct rewritten). The log no longer proves anything, which is the point: tampering is always visible.</td></tr>";
+    }
+  } catch (e) { alert("Tamper failed: " + e.message + " (run a delivery first)"); }
+});
+
+$("resetBtn").addEventListener("click", async () => {
+  await api("/demo/reset", {});
+  location.reload();
+});
+
+refreshChain();
+</script>
+</body>
+</html>
