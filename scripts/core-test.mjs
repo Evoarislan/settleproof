@@ -198,4 +198,64 @@ function newEscrow(chain) {
   console.log("8. damaged goods condition path: ok");
 }
 
+// 9. Double-settlement race: two concurrent approve calls settle only once;
+//    a rail failure rolls back to decided and a retry can succeed.
+{
+  const chain = new ReceiptChain();
+  const mandate = createMandate({
+    id: "order-racetest",
+    buyer: "buyer-demo",
+    seller: "seller-demo",
+    concept: "box",
+    expectedCount: 10,
+    totalAmount: 120,
+  });
+  let railCalls = 0;
+  const slowRail = {
+    async settle() {
+      railCalls++;
+      await new Promise((r) => setTimeout(r, 50));
+      return { txRef: "0xslow" };
+    },
+  };
+  const escrow = new Escrow(mandate, chain, slowRail);
+  escrow.fund();
+  await evaluateDelivery(
+    escrow,
+    "data:image/png;base64,stub",
+    stubProviders(10, { decision: "release", releasePct: 100, reason: "All present." })
+  );
+  const results = await Promise.allSettled([escrow.approve("john"), escrow.approve("john")]);
+  const okCount = results.filter((r) => r.status === "fulfilled").length;
+  const failCount = results.filter((r) => r.status === "rejected").length;
+  assert.equal(okCount, 1);
+  assert.equal(failCount, 1);
+  assert.equal(railCalls, 1);
+  assert.equal(escrow.state, "settled");
+
+  // Rail failure rolls back; retry succeeds.
+  const chain2 = new ReceiptChain();
+  let attempts = 0;
+  const flakyRail = {
+    async settle() {
+      attempts++;
+      if (attempts === 1) throw new Error("rail down");
+      return { txRef: "0xretry" };
+    },
+  };
+  const escrow2 = new Escrow(mandate, chain2, flakyRail);
+  escrow2.fund();
+  await evaluateDelivery(
+    escrow2,
+    "data:image/png;base64,stub",
+    stubProviders(10, { decision: "release", releasePct: 100, reason: "All present." })
+  );
+  await assert.rejects(() => escrow2.approve("john"), /rail down/);
+  assert.equal(escrow2.state, "decided");
+  const retry = await escrow2.approve("john");
+  assert.equal(retry.txRef, "0xretry");
+  assert.equal(escrow2.state, "settled");
+  console.log("9. double-settle race closed + rail-failure rollback: ok");
+}
+
 console.log("core tests: all passed");

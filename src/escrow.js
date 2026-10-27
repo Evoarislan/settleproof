@@ -12,6 +12,7 @@ export const STATES = {
   FUNDED: "funded",
   EVIDENCE: "evidence-submitted",
   DECIDED: "decided",
+  SETTLING: "settling",
   SETTLED: "settled",
   HELD: "held",
 };
@@ -90,18 +91,28 @@ export class Escrow {
   async approve(approver) {
     this._require(STATES.DECIDED, "approve");
     const { releaseAmount, heldAmount, decision } = this.decision.final;
+    // Claim the transition synchronously, before any await. A second
+    // approve call (double click, client retry, concurrent request) then
+    // fails the state check instead of settling twice. If the rail call
+    // fails, the state rolls back to decided so approval can be retried.
+    this.state = STATES.SETTLING;
     let txRef = null;
     let railMeta = null;
-    if (releaseAmount > 0) {
-      const out = await this.rail.settle({
-        amount: releaseAmount,
-        currency: this.mandate.currency,
-        to: this.mandate.seller,
-        memo: `settleproof ${this.mandate.id} release ${decision}`,
-      });
-      txRef = out.txRef;
-      const { txRef: _omit, ...rest } = out;
-      railMeta = Object.keys(rest).length ? rest : null;
+    try {
+      if (releaseAmount > 0) {
+        const out = await this.rail.settle({
+          amount: releaseAmount,
+          currency: this.mandate.currency,
+          to: this.mandate.seller,
+          memo: `settleproof ${this.mandate.id} release ${decision}`,
+        });
+        txRef = out.txRef;
+        const { txRef: _omit, ...rest } = out;
+        railMeta = Object.keys(rest).length ? rest : null;
+      }
+    } catch (err) {
+      this.state = STATES.DECIDED;
+      throw err;
     }
     this.settlement = { releasedAmount: releaseAmount, heldAmount, txRef, rail: railMeta, approver };
     this.state = decision === "hold" ? STATES.HELD : STATES.SETTLED;
