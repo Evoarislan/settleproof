@@ -13,8 +13,22 @@ export function createMandate({
   totalAmount,
   currency = "USD-TEST",
 }) {
-  if (!id || !concept || !expectedCount || !totalAmount) {
-    throw new Error("mandate requires id, concept, expectedCount, totalAmount");
+  // Input validation (audit F6): money fields are typed and ranged, so a
+  // malformed order fails loudly instead of corrupting the receipts.
+  const bad = (msg) => {
+    const e = new Error(msg);
+    e.status = 400;
+    return e;
+  };
+  if (!id) throw bad("mandate requires id");
+  if (typeof concept !== "string" || !concept.trim() || concept.length > 200) {
+    throw bad("concept must be a string of 1-200 characters");
+  }
+  if (!Number.isInteger(expectedCount) || expectedCount < 1 || expectedCount > 100000) {
+    throw bad("expectedCount must be an integer between 1 and 100000");
+  }
+  if (typeof totalAmount !== "number" || !Number.isFinite(totalAmount) || totalAmount <= 0) {
+    throw bad("totalAmount must be a positive number");
   }
   return {
     id,
@@ -48,8 +62,11 @@ export function releaseBand(mandate, samCountValue) {
   if (samCountValue >= expectedCount) {
     return { decision: "release", releasePct: 100, releaseAmount: totalAmount, heldAmount: 0 };
   }
-  const releasePct = Math.round((samCountValue / expectedCount) * 100);
-  const releaseAmount = Math.round(((totalAmount * releasePct) / 100) * 100) / 100;
+  // Exact-fraction money: the amount comes from the true share, and the
+  // displayed percentage is floored, so rounding can never push a partial
+  // hold up to a full release (audit F6 rounding note).
+  const releaseAmount = Math.round(totalAmount * (samCountValue / expectedCount) * 100) / 100;
+  const releasePct = Math.floor((samCountValue / expectedCount) * 100);
   return {
     decision: "partial-hold",
     releasePct,

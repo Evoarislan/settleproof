@@ -115,7 +115,7 @@
     </div>
     <div class="count-row">
       <div class="count-big" id="countBig">– / 10</div>
-      <div class="count-sub">items verified by SAM 3.1 segmentation.<br>The count is law: it, not the language model, sets the release.</div>
+      <div class="count-sub" id="countSub">items verified by SAM 3.1 segmentation.<br>The count is law: it, not the language model, sets the release.</div>
     </div>
     <div class="moneybar">
       <div class="rel" id="barRel" style="width:0%"></div>
@@ -132,6 +132,7 @@
       <p style="color:var(--muted);font-size:14px;line-height:1.5;">No decision yet. When evidence arrives, Muse Spark reads the mandate, SAM 3.1 counts the items, and the agent explains its call here.</p>
     </div>
     <button class="primary" id="approveBtn" disabled>Human approval: settle</button>
+    <button class="danger" id="rejectBtn" disabled style="width:100%;margin-top:10px;">Reject decision: send it back for a re-check</button>
     <div class="settle" id="settleBox"></div>
     <h2 style="margin-top:22px;">Receipts</h2>
     <div style="max-height:300px;overflow:auto;">
@@ -153,6 +154,14 @@
 const $ = (id) => document.getElementById(id);
 let currentOrder = null;
 let currentDecision = null;
+let busy = false;
+let recheckMode = false;
+
+// Every dynamic string (model output, receipt fields, user input) goes
+// through this before it touches innerHTML (audit F5).
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 
 // Presenter token for the token-gated routes (approve, demo controls) when
 // the server runs with DEMO_TOKEN set. Comes from ?token= in the demo link
@@ -202,6 +211,7 @@ function assetDataUri(path) {
   }));
 }
 
+let overlayRun = 0;
 function drawOverlay(boxes) {
   const img = $("evidenceImg");
   const canvas = $("overlay");
@@ -209,20 +219,32 @@ function drawOverlay(boxes) {
   canvas.width = wrap.clientWidth;
   canvas.height = wrap.clientHeight;
   const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!boxes.length) return;
-  const refW = boxes[0].w, refH = boxes[0].h;
-  const sx = img.clientWidth / refW, sy = img.clientHeight / refH;
+  const run = ++overlayRun;
   const sorted = [...boxes].sort((a, b) => (Math.floor(a.y1 / 80) - Math.floor(b.y1 / 80)) || (a.x1 - b.x1));
-  sorted.forEach((b, i) => {
-    const x = b.x1 * sx, y = b.y1 * sy, w = (b.x2 - b.x1) * sx, h = (b.y2 - b.y1) * sy;
-    ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 3;
-    ctx.strokeRect(x, y, w, h);
-    ctx.fillStyle = "#ff3b30";
-    ctx.fillRect(x, y, 30, 30);
-    ctx.fillStyle = "#fff"; ctx.font = "bold 19px sans-serif";
-    ctx.fillText(String(i + 1), x + 8, y + 22);
-  });
+  function drawUpTo(n) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!sorted.length) return;
+    const refW = sorted[0].w, refH = sorted[0].h;
+    const sx = img.clientWidth / refW, sy = img.clientHeight / refH;
+    sorted.slice(0, n).forEach((b, i) => {
+      const x = b.x1 * sx, y = b.y1 * sy, w = (b.x2 - b.x1) * sx, h = (b.y2 - b.y1) * sy;
+      ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = "#ff3b30";
+      ctx.fillRect(x, y, 30, 30);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 19px sans-serif";
+      ctx.fillText(String(i + 1), x + 8, y + 22);
+    });
+  }
+  // The count lands box by box, the way the eye counts it.
+  let shown = 0;
+  drawUpTo(0);
+  (function stepReveal() {
+    if (run !== overlayRun || shown >= sorted.length) return;
+    shown++;
+    drawUpTo(shown);
+    if (shown < sorted.length) setTimeout(stepReveal, 130);
+  })();
 }
 
 function renderDecision(decision) {
@@ -233,6 +255,9 @@ function renderDecision(decision) {
   if (decision.damagedCount > 0) {
     $("countBig").textContent = shown + " / 10 good";
   }
+  $("countSub").innerHTML = decision.damagedCount > 0
+    ? "items in good condition. SAM 3.1 counted " + decision.samCount + " present; the Spark condition check graded " + decision.damagedCount + " damaged. Only good items set the release."
+    : "items verified by SAM 3.1 segmentation.<br>The count is law: it, not the language model, sets the release.";
   $("barRel").style.width = f.releasePct + "%";
   $("barRel").textContent = f.releasePct > 12 ? "$" + f.releaseAmount.toFixed(2) : "";
   $("barHeld").style.width = (100 - f.releasePct) + "%";
@@ -242,12 +267,15 @@ function renderDecision(decision) {
   const badgeText = f.decision === "release" ? "RELEASE IN FULL" : f.decision === "partial-hold" ? "PARTIAL HOLD" : "HOLD ALL";
   $("decisionBody").innerHTML =
     '<span class="badge ' + f.decision + '">' + badgeText + "</span>" +
-    '<div class="explain">' + decision.explanation + "</div>" +
-    (decision.damagedCount > 0 ? '<p style="font-size:13px;color:var(--muted);">Condition check (Spark vision): ' + decision.damagedCount + ' of ' + decision.samCount + ' present items visibly damaged' + (decision.condition && decision.condition.notes ? ' — ' + decision.condition.notes : '') + '. Damaged items are held like missing ones, per the mandate.</p>' : "") +
+    '<div class="explain">' + esc(decision.explanation) + "</div>" +
+    (decision.damagedCount > 0 ? '<p style="font-size:13px;color:var(--muted);">Condition check (Spark vision): ' + decision.damagedCount + ' of ' + decision.samCount + ' present items visibly damaged' + (decision.condition && decision.condition.notes ? ' — ' + esc(decision.condition.notes) : '') + '. Damaged items are held like missing ones, per the mandate.</p>' : "") +
+    (decision.conditionDiscrepancy ? '<div class="override" style="color:#b97a00;">Cross-check flagged: the vision pass reported a different item total than SAM counted. The disagreement is recorded in the receipts for the approver.</div>' : "") +
+    (decision.conditionError ? '<div class="override" style="color:#b97a00;">The condition check failed on this run, so no damage was deducted. The failure is recorded in the receipts.</div>' : "") +
     (decision.overCount > 0 ? '<div class="override" style="color:#b97a00;">Over-count flagged: SAM found ' + decision.samCount + ' items against a mandate of 10. Release capped at 100% and the surplus is recorded in the receipts for the approver.</div>' : "") +
     (decision.engineOverride ? '<div class="override">The language model proposed a different outcome. The verified SAM count overruled it, and the override is in the receipts.</div>' : "") +
     '<p style="font-size:13px;color:var(--muted);">Decided by the mandate band from the SAM 3.1 count, explained by Muse Spark. Awaiting human approval.</p>';
   $("approveBtn").disabled = false;
+  $("rejectBtn").disabled = false;
   setStep("st-evidence", "done");
   setStep("st-decided", "on");
 }
@@ -257,34 +285,74 @@ async function renderReceipts() {
   const o = await api("/orders/" + currentOrder);
   const rows = o.receipts.map(r => {
     let detail = "";
-    if (r.kind === "decision") detail = r.data.decision + " at " + r.data.releasePct + "% · SAM " + r.data.samCount + "/" + r.data.expectedCount;
-    else if (r.kind === "approved-and-settled") detail = "released $" + r.data.releasedAmount + " · held $" + r.data.heldAmount;
+    if (r.kind === "decision") detail = r.data.decision + " at " + r.data.releasePct + "% · SAM " + r.data.samCount + "/" + r.data.expectedCount + (r.data.damagedCount > 0 ? " · damaged " + r.data.damagedCount : "") + (r.data.conditionFailed ? " · condition check failed" : "");
+    else if (r.kind === "approved-and-settled") detail = "released $" + r.data.releasedAmount + " · held $" + r.data.heldAmount + (r.data.txRef ? " · tx " + String(r.data.txRef).slice(0, 14) + "…" : "");
+    else if (r.kind === "settlement-submitted") detail = "live transfer broadcast · tx " + String(r.data.txRef).slice(0, 14) + "…";
     else if (r.kind === "funded") detail = "$" + r.data.amount + " " + r.data.currency;
     else if (r.kind === "evidence-submitted") detail = "photo sha256 " + String(r.data.evidence.sha256).slice(0, 12) + "…";
-    else if (r.kind === "mandate-created") detail = r.data.expectedCount + " × " + r.data.concept;
+    else if (r.kind === "evidence-resubmitted") detail = "re-check photo sha256 " + String(r.data.evidence.sha256).slice(0, 12) + "…";
+    else if (r.kind === "decision-rejected") detail = "rejected by " + esc(r.data.rejector || "human") + (r.data.reason ? ": " + esc(r.data.reason) : "");
+    else if (r.kind === "evaluation-failed") detail = "provider error; order returned to funded for retry";
+    else if (r.kind === "mandate-created") detail = r.data.expectedCount + " × " + esc(r.data.concept);
     return "<tr><td>" + r.seq + "</td><td>" + r.kind + "</td><td>" + detail + '</td></tr>';
   }).join("");
   $("receiptRows").innerHTML = rows || '<tr><td colspan="3">None yet.</td></tr>';
   await refreshChain();
 }
 
+function setBusy(on) {
+  busy = on;
+  document.querySelectorAll(".scenario").forEach((b) => { b.disabled = on; });
+}
+
+// A new run never shows the previous run's count, bar, or decision while
+// it waits: the panel says what is happening instead of looking frozen.
+function clearRunUI() {
+  currentDecision = null;
+  $("countBig").textContent = "– / 10";
+  $("countSub").textContent = "Checking the delivery photo…";
+  $("barRel").style.width = "0%";
+  $("barRel").textContent = "";
+  $("barHeld").style.width = "0%";
+  $("barHeld").textContent = "";
+  $("relLabel").textContent = "Released: $0.00";
+  $("heldLabel").textContent = "Held: $0.00";
+  $("decisionBody").innerHTML = '<p style="color:var(--muted);font-size:14px;line-height:1.5;">SAM 3.1 is counting the shipment and Muse Spark is reading the mandate. The first run on a cold server can take up to half a minute.</p>';
+  $("settleBox").style.display = "none";
+  $("approveBtn").disabled = true;
+  $("rejectBtn").disabled = true;
+}
+
 async function runWithDataUri(dataUri) {
-  const order = await api("/orders", {
-    buyer: "Alex R.", seller: "Maya, Northlight Goods",
-    concept: "white product box", expectedCount: 10, totalAmount: 120,
-  });
-  currentOrder = order.mandate.id;
-  $("ordId").textContent = currentOrder;
-  setStep("st-funded", "done");
-  const img = $("evidenceImg");
-  img.src = dataUri;
-  img.style.display = "block";
-  $("emptyNote").style.display = "none";
-  await new Promise(r => { img.onload = r; });
-  const out = await api("/orders/" + currentOrder + "/evidence", { imageDataUri: dataUri });
-  drawOverlay(out.decision.samBoxes || []);
-  renderDecision(out.decision);
-  await renderReceipts();
+  if (busy) return;
+  setBusy(true);
+  clearRunUI();
+  try {
+    if (!(recheckMode && currentOrder)) {
+      const order = await api("/orders", {
+        buyer: "Alex R.", seller: "Maya, Northlight Goods",
+        concept: "white product box", expectedCount: 10, totalAmount: 120,
+      });
+      currentOrder = order.mandate.id;
+      $("ordId").textContent = currentOrder;
+      setStep("st-funded", "done");
+      setStep("st-decided", "");
+      setStep("st-settled", "");
+    }
+    recheckMode = false;
+    const img = $("evidenceImg");
+    img.src = dataUri;
+    img.style.display = "block";
+    $("emptyNote").style.display = "none";
+    await new Promise(r => { img.onload = r; });
+    setStep("st-evidence", "on");
+    const out = await api("/orders/" + currentOrder + "/evidence", { imageDataUri: dataUri });
+    drawOverlay(out.decision.samBoxes || []);
+    renderDecision(out.decision);
+    await renderReceipts();
+  } finally {
+    setBusy(false);
+  }
 }
 
 document.querySelectorAll(".scenario[data-asset]").forEach(btn => {
@@ -314,14 +382,32 @@ $("approveBtn").addEventListener("click", async () => {
     const out = await api("/orders/" + currentOrder + "/approve", { approver: "ops-human (demo)" });
     const box = $("settleBox");
     box.style.display = "block";
+    const tx = out.settlement.txRef;
+    const refHtml = tx && /^0x[0-9a-fA-F]{64}$/.test(tx)
+      ? 'rail ref: <a href="https://basescan.org/tx/' + tx + '" target="_blank" rel="noopener">view this settlement on Basescan</a>'
+      : "rail ref: " + esc(tx || "none (full hold)");
     box.innerHTML = "<strong>Settled.</strong> Released $" + out.settlement.releasedAmount.toFixed(2) +
       " to Maya" + (out.settlement.heldAmount > 0 ? ", holding $" + out.settlement.heldAmount.toFixed(2) + " until the missing item ships" : "") +
-      ".<br><span class='mono'>rail ref: " + (out.settlement.txRef || "none (full hold)") + "</span>";
+      ". Maya is paid in minutes, not up to 14 days.<br><span class='mono'>" + refHtml + "</span>";
     $("approveBtn").disabled = true;
+    $("rejectBtn").disabled = true;
     setStep("st-decided", "done");
     setStep("st-settled", "done");
     await renderReceipts();
   } catch (e) { alert("Approve failed: " + e.message); }
+});
+
+$("rejectBtn").addEventListener("click", async () => {
+  try {
+    await api("/orders/" + currentOrder + "/reject", { reason: "recount requested from the demo" });
+    $("decisionBody").innerHTML = '<p style="font-size:14px;line-height:1.5;">Decision rejected by the human approver. Nothing settled. The order is back at evidence: run a delivery again to re-check this same order with new proof. The rejection itself is written into the receipts.</p>';
+    $("approveBtn").disabled = true;
+    $("rejectBtn").disabled = true;
+    recheckMode = true;
+    setStep("st-decided", "");
+    setStep("st-evidence", "on");
+    await renderReceipts();
+  } catch (e) { alert("Reject failed: " + e.message); }
 });
 
 $("tamperBtn").addEventListener("click", async () => {

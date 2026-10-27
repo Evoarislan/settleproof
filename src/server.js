@@ -57,8 +57,16 @@ function rateOk(key, limit, windowMs = 60000) {
   return true;
 }
 function clientIp(req) {
+  // Key on the LAST X-Forwarded-For entry: the one appended by the proxy
+  // closest to this server. The first entry is whatever the client claims
+  // and is trivially forged, which would let a caller rotate fake IPs and
+  // never hit a rate limit (verified by probe, Oct 27 swarm loop).
   const xff = req.headers["x-forwarded-for"];
-  return (xff ? String(xff).split(",")[0].trim() : "") || req.socket.remoteAddress || "unknown";
+  if (xff) {
+    const entries = String(xff).split(",").map((s) => s.trim()).filter(Boolean);
+    if (entries.length) return entries[entries.length - 1];
+  }
+  return req.socket.remoteAddress || "unknown";
 }
 
 function readBody(req) {
@@ -107,7 +115,10 @@ const ASSETS = {
 
 const server = createServer(async (req, res) => {
   const send = (code, obj) => {
-    res.writeHead(code, { "content-type": "application/json" });
+    res.writeHead(code, {
+      "content-type": "application/json",
+      "x-content-type-options": "nosniff",
+    });
     res.end(JSON.stringify(obj));
   };
   const url = new URL(req.url, "http://localhost");
@@ -123,12 +134,22 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
       const html = readFileSync(new URL("../public/index.html", import.meta.url));
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "x-content-type-options": "nosniff",
+        // The page is a single inline file; the CSP still fences it to
+        // same-origin code and self/data/blob images (audit F5 hardening).
+        "content-security-policy":
+          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'",
+      });
       return res.end(html);
     }
     if (req.method === "GET" && parts[0] === "assets" && ASSETS[parts[1]]) {
       const data = readFileSync(new URL(`../test-assets/${parts[1]}`, import.meta.url));
-      res.writeHead(200, { "content-type": ASSETS[parts[1]] });
+      res.writeHead(200, {
+        "content-type": ASSETS[parts[1]],
+        "x-content-type-options": "nosniff",
+      });
       return res.end(data);
     }
     if (req.method === "GET" && url.pathname === "/health") {
@@ -222,7 +243,15 @@ const server = createServer(async (req, res) => {
 
     return send(404, { error: "not found" });
   } catch (err) {
-    return send(err.status || 500, { error: String(err.message || err) });
+    const msg = String(err.message || err);
+    if (err.status) return send(err.status, { error: msg });
+    // Upstream provider bodies stay server-side (audit F8): the client
+    // gets a generic 502, never the raw Meta API error text.
+    if (/^(sam|spark) http \d+/.test(msg)) {
+      console.error("provider error:", msg);
+      return send(502, { error: "upstream provider error" });
+    }
+    return send(500, { error: msg });
   }
 });
 

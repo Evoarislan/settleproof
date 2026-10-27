@@ -2,7 +2,7 @@
 // Run: node scripts/core-test.mjs
 import assert from "node:assert";
 import { ReceiptChain } from "../src/receipts.js";
-import { createMandate } from "../src/mandate.js";
+import { createMandate, releaseBand } from "../src/mandate.js";
 import { Escrow, mockRail } from "../src/escrow.js";
 import { evaluateDelivery } from "../src/engine.js";
 
@@ -314,6 +314,68 @@ function newEscrow(chain) {
   assert.equal(settlement.releasedAmount, 120);
   assert.equal(chain.verify().ok, true);
   console.log("11. reject -> re-evaluation: ok");
+}
+
+// 12. N1: a live transfer that broadcasts and then fails confirmation
+//     must never be retried into a double payment. The hash is receipted
+//     at broadcast, the order stays in settling, and retries are refused.
+{
+  const chain = new ReceiptChain();
+  const mandate = createMandate({
+    id: "order-broadcast",
+    buyer: "buyer-demo",
+    seller: "seller-demo",
+    concept: "box",
+    expectedCount: 10,
+    totalAmount: 120,
+  });
+  let settleCalls = 0;
+  const broadcastRail = {
+    async settle(args) {
+      settleCalls++;
+      if (args.onBroadcast) args.onBroadcast("0xbroadcast");
+      throw new Error("confirmation timeout");
+    },
+  };
+  const escrow = new Escrow(mandate, chain, broadcastRail);
+  escrow.fund();
+  await evaluateDelivery(
+    escrow,
+    "data:image/png;base64,stub",
+    stubProviders(10, { decision: "release", releasePct: 100, reason: "All present." })
+  );
+  await assert.rejects(() => escrow.approve("john"), /already broadcast/);
+  assert.equal(escrow.state, "settling");
+  await assert.rejects(() => escrow.approve("john"), /already broadcast/);
+  assert.equal(settleCalls, 1);
+  assert.ok(chain.receipts.some((r) => r.kind === "settlement-submitted"));
+  assert.equal(chain.verify().ok, true);
+  console.log("12. broadcast-then-fail never double-pays: ok");
+}
+
+// 13. F6: mandate validation rejects bad money fields, and the release
+//     band uses exact-fraction amounts with a floored percentage, so a
+//     just-short count can never round up to a full release.
+{
+  assert.throws(
+    () => createMandate({ id: "x", concept: "box", expectedCount: 0, totalAmount: 100 }),
+    /expectedCount/
+  );
+  assert.throws(
+    () => createMandate({ id: "x", concept: "box", expectedCount: 10, totalAmount: "120" }),
+    /totalAmount/
+  );
+  assert.throws(
+    () => createMandate({ id: "x", concept: "box", expectedCount: 10, totalAmount: -5 }),
+    /totalAmount/
+  );
+  const m = createMandate({ id: "x", concept: "box", expectedCount: 200, totalAmount: 200 });
+  const band = releaseBand(m, 199);
+  assert.equal(band.decision, "partial-hold");
+  assert.equal(band.releasePct, 99);
+  assert.equal(band.releaseAmount, 199);
+  assert.equal(band.heldAmount, 1);
+  console.log("13. mandate validation + exact release math: ok");
 }
 
 console.log("core tests: all passed");

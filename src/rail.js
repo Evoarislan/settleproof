@@ -46,7 +46,7 @@ export async function createLiveRail({ keyPath, sellerAddress, rate = 0.01, rpcU
 
   return {
     mode: "live",
-    async settle({ amount, memo }) {
+    async settle({ amount, memo, onBroadcast }) {
       const usdcAmount = Math.round(amount * rate * 1e6) / 1e6;
       if (usdcAmount <= 0) {
         return { txRef: null, usdcAmount: 0, rate, note: "amount below live rail minimum" };
@@ -57,7 +57,17 @@ export async function createLiveRail({ keyPath, sellerAddress, rate = 0.01, rpcU
         functionName: "transfer",
         args: [sellerAddress, parseUnits(usdcAmount.toFixed(6), 6)],
       });
-      const receipt = await pub.waitForTransactionReceipt({ hash });
+      // The money is committed the moment the tx broadcasts, before
+      // confirmation. The caller records the hash first (audit follow-up
+      // N1), so a confirmation failure can never lose it and invite a
+      // double-paying retry.
+      if (onBroadcast) onBroadcast(hash);
+      let receipt;
+      try {
+        receipt = await pub.waitForTransactionReceipt({ hash });
+      } catch {
+        throw new Error(`live rail confirmation failed for tx ${hash}`);
+      }
       if (receipt.status !== "success") {
         throw new Error(`live rail transfer failed on chain: ${hash}`);
       }

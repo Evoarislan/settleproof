@@ -111,3 +111,33 @@
   tests 10 and 11 cover SAM-failure rollback and reject -> re-evidence)
   and scripts/server-test.mjs 6/6 against a real booted server in mock
   mode (body cap, both rate limits, both token gates).
+- Oct 27, 2026: SWARM LOOP 2 (three lanes: judge sim, security second
+  pass, live demo run-through; reports in ../SWARM-LOOP-2-LANE-*.md).
+  Judge sim scored the build 7.1 weighted (Impact 6.5, Tooling 7.5, Demo
+  7.0, Technical 7.5) against the Oct 24 sim's 8.2 post-fix estimate; the
+  gap is judge-facing (no public URL yet, mock settlement visible, no
+  fix-and-release flow), not engineering. Fixes landed in this loop:
+  rate limits now key on the LAST X-Forwarded-For entry (first entry is
+  client-forged; probe-verified bypass closed); F5 UI escaping for all
+  model/user strings plus a CSP and nosniff headers; F6 mandate input
+  validation (400s) and exact-fraction release amounts with a floored
+  percentage (199/200 now partial-holds at 99%, never rounds to full);
+  F9 META_API_MODE=mock now actually forces mock providers; F8-lite:
+  provider error bodies stay server-side, clients get a generic 502, and
+  condition-check failures no longer leak upstream text into responses.
+  N1 (new, live rail): the transfer hash is receipted as
+  settlement-submitted at broadcast, before confirmation; a
+  confirmation failure leaves the order in settling with the hash on
+  record and retries are refused, so a retry can never double-pay.
+  N4: the vision totalVisible is cross-checked against SAM's count; a
+  disagreement is flagged in the decision and receipted, and condition
+  failures are receipted too. Demo: busy state with scenario buttons
+  locked and a plain "counting" panel (a cold first call took 29.4s in
+  Lane C's run), stale UI cleared at run start, SAM boxes reveal one by
+  one, the damaged-case caption now credits SAM and Spark honestly, a
+  Reject button drives the re-check flow on the same order, receipt
+  details cover the new receipt kinds, and a live settlement links to
+  Basescan with the paid-in-minutes line. Tests: core 13/13, server 8/8,
+  selftest pass, live regression green (damaged flow exact, reject ->
+  re-check decides live). Deferred by design: post-settlement held-
+  remainder top-up flow and persistence-lite (noted for post-freeze).

@@ -4,8 +4,11 @@
 
 const BASE = "https://api.meta.ai/v1";
 const hasKey = () => Boolean(process.env.META_API_KEY);
+// META_API_MODE is honored (audit F9): "mock" forces the mock providers
+// even when a key is present, so an operator can stop live spend by config.
+const liveEnabled = () => hasKey() && process.env.META_API_MODE !== "mock";
 
-export const providerMode = () => (hasKey() ? "live" : "mock");
+export const providerMode = () => (liveEnabled() ? "live" : "mock");
 
 function authHeaders() {
   return {
@@ -19,7 +22,7 @@ function authHeaders() {
 // tokens count against max_tokens. Keep max_tokens generous (>=1200) or the
 // answer comes back empty with finish_reason "length".
 export async function sparkChat(messages, { maxTokens = 1200 } = {}) {
-  if (!hasKey()) return null;
+  if (!liveEnabled()) return null;
   const resp = await fetch(`${BASE}/chat/completions`, {
     method: "POST",
     headers: authHeaders(),
@@ -45,7 +48,7 @@ export async function sparkChat(messages, { maxTokens = 1200 } = {}) {
 // visibly damaged, with locations. The engine treats this as an assessment
 // input to the deterministic band, disclosed as spark-vision in receipts.
 export async function sparkCondition(imageDataUri) {
-  if (!hasKey()) {
+  if (!liveEnabled()) {
     return { provider: "mock-spark-vision", damagedCount: 0, totalVisible: null, notes: "mock condition check" };
   }
   const out = await sparkChat([
@@ -81,7 +84,7 @@ export async function sparkCondition(imageDataUri) {
 }
 
 export async function sparkDecide(input) {
-  if (!hasKey()) {
+  if (!liveEnabled()) {
     return {
       provider: "mock-spark",
       decision: "hold",
@@ -99,7 +102,7 @@ export async function sparkDecide(input) {
 // the item count, and it is deterministic law in the decision engine: it
 // overrides any language-model first impression.
 export async function samCount(imageDataUri, concept) {
-  if (!hasKey()) {
+  if (!liveEnabled()) {
     return { provider: "mock-sam", count: null, boxes: [], masks: [] };
   }
   const resp = await fetch(`${BASE}/responses`, {

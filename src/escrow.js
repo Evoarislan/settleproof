@@ -27,6 +27,7 @@ export class Escrow {
     this.state = STATES.CREATED;
     this.decision = null; // {band, spark, final} once decided
     this.settlement = null; // {releasedAmount, heldAmount, txRef} once settled
+    this.pendingTxHash = null; // set when a live transfer broadcasts (N1)
     this.chain.append("mandate-created", {
       mandateId: mandate.id,
       buyer: mandate.buyer,
@@ -105,6 +106,9 @@ export class Escrow {
       damagedCount: decision.damagedCount ?? 0,
       effectiveCount: decision.effectiveCount ?? decision.samCount,
       conditionSource: decision.condition ? decision.condition.provider : null,
+      conditionTotalVisible: decision.condition?.totalVisible ?? null,
+      conditionDiscrepancy: decision.conditionDiscrepancy ?? false,
+      conditionFailed: Boolean(decision.conditionError),
       overCount: decision.overCount ?? 0,
       expectedCount: this.mandate.expectedCount,
       sparkProposed: decision.spark?.decision ?? null,
@@ -117,12 +121,22 @@ export class Escrow {
 
   // Human approval gate. Nothing settles without this call.
   async approve(approver) {
+    // A previous attempt already broadcast a live transfer: its hash is
+    // receipted and the money may be gone. Never settle a second time;
+    // a human reconciles against the hash first (audit follow-up N1).
+    if (this.state === STATES.SETTLING && this.pendingTxHash) {
+      throw new Error(
+        `settlement already broadcast (${this.pendingTxHash}); reconcile before retrying`
+      );
+    }
     this._require(STATES.DECIDED, "approve");
     const { releaseAmount, heldAmount, decision } = this.decision.final;
     // Claim the transition synchronously, before any await. A second
     // approve call (double click, client retry, concurrent request) then
     // fails the state check instead of settling twice. If the rail call
-    // fails, the state rolls back to decided so approval can be retried.
+    // fails before broadcasting, the state rolls back to decided so
+    // approval can be retried; if it fails after broadcasting, the order
+    // stays in settling with the hash recorded, and retries are refused.
     this.state = STATES.SETTLING;
     let txRef = null;
     let railMeta = null;
@@ -133,15 +147,29 @@ export class Escrow {
           currency: this.mandate.currency,
           to: this.mandate.seller,
           memo: `settleproof ${this.mandate.id} release ${decision}`,
+          onBroadcast: (hash) => {
+            this.pendingTxHash = hash;
+            this.chain.append("settlement-submitted", {
+              mandateId: this.mandate.id,
+              txRef: hash,
+              amount: releaseAmount,
+            });
+          },
         });
         txRef = out.txRef;
         const { txRef: _omit, ...rest } = out;
         railMeta = Object.keys(rest).length ? rest : null;
       }
     } catch (err) {
+      if (this.pendingTxHash) {
+        throw new Error(
+          `settlement already broadcast (${this.pendingTxHash}); reconcile before retrying`
+        );
+      }
       this.state = STATES.DECIDED;
       throw err;
     }
+    this.pendingTxHash = null;
     this.settlement = { releasedAmount: releaseAmount, heldAmount, txRef, rail: railMeta, approver };
     this.state = decision === "hold" ? STATES.HELD : STATES.SETTLED;
     this.chain.append("approved-and-settled", {

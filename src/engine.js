@@ -63,11 +63,26 @@ export async function evaluateDelivery(escrow, imageDataUri, providers = livePro
       condition = await providers.sparkCondition(imageDataUri);
       damagedCount = Math.max(0, Math.min(condition.damagedCount || 0, sam.count ?? 0));
     } catch (err) {
-      conditionError = String(err).slice(0, 200);
+      // The upstream body stays server-side (audit F8 class): clients and
+      // receipts see only that the check failed, never the raw error.
+      console.error("spark condition check failed:", err);
+      conditionError = "condition check failed";
     }
   }
   const effectiveCount = Math.max(0, (sam.count ?? 0) - damagedCount);
   const band = releaseBand(mandate, effectiveCount);
+
+  // Cross-check (audit follow-up N4): the vision pass also reports how
+  // many items it saw in total. If that disagrees with SAM's count, the
+  // damage grade rests on a different view of the photo than the count of
+  // record, so the disagreement is flagged and receipted, not trusted
+  // silently.
+  const conditionDiscrepancy = Boolean(
+    condition &&
+      typeof condition.totalVisible === "number" &&
+      sam.count != null &&
+      condition.totalVisible !== sam.count
+  );
 
   // Over-count sanity flag: more items segmented than the mandate expects
   // (a loose concept phrase can catch the shipping carton too). The band
@@ -124,6 +139,7 @@ export async function evaluateDelivery(escrow, imageDataUri, providers = livePro
     effectiveCount,
     condition,
     conditionError,
+    conditionDiscrepancy,
     overCount,
     band,
     spark: spark && !spark.error ? spark : null,

@@ -104,6 +104,35 @@ try {
   assert.equal(rsYes.status, 200);
   console.log("5. demo reset token gate: ok");
 
+  // 6. Mandate validation (F6): a malformed order is a 400, not a 500.
+  //    Sent under a fresh XFF key so the rate limiter does not mask it.
+  const badOrder = await post(
+    "/orders",
+    { concept: "box", expectedCount: 0, totalAmount: 120 },
+    { "x-forwarded-for": "7.7.7.7" }
+  );
+  assert.equal(badOrder.status, 400);
+  console.log("6. mandate validation 400: ok");
+
+  // 7. Rate-limit keying: rotating the first X-Forwarded-For entry (the
+  //    client-controlled one) must not reset the limit. The last entry is
+  //    the key, so the fourth create under the same last entry is a 429.
+  for (let i = 1; i <= 3; i++) {
+    const r = await post(
+      "/orders",
+      { concept: "white product box", expectedCount: 10, totalAmount: 120 },
+      { "x-forwarded-for": `${i}.${i}.${i}.${i}, 9.9.9.9` }
+    );
+    assert.equal(r.status, 201);
+  }
+  const r4 = await post(
+    "/orders",
+    { concept: "white product box", expectedCount: 10, totalAmount: 120 },
+    { "x-forwarded-for": "4.4.4.4, 9.9.9.9" }
+  );
+  assert.equal(r4.status, 429);
+  console.log("7. XFF rotation does not evade the rate limit: ok");
+
   console.log("server tests: all passed");
 } finally {
   child.kill("SIGKILL");
