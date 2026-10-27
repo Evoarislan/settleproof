@@ -42,7 +42,15 @@ export async function evaluateDelivery(escrow, imageDataUri, providers = livePro
     concept: mandate.concept,
   });
 
-  const sam = await providers.samCount(imageDataUri, mandate.concept);
+  // A transient SAM failure rolls the escrow back to funded (receipted as
+  // evaluation-failed) and propagates, so the caller can retry (audit F4).
+  let sam;
+  try {
+    sam = await providers.samCount(imageDataUri, mandate.concept);
+  } catch (err) {
+    escrow.failEvaluation(String(err).slice(0, 200));
+    throw err;
+  }
 
   // Condition check: SAM counts presence but cannot grade condition from a
   // text concept, so Spark vision assesses damage. Its damaged count feeds

@@ -6,6 +6,8 @@
 //         decided --approve--> settled (release or partial-hold)
 //         decided --approve--> held    (hold decisions settle as fully held)
 //         decided --reject---> evidence-submitted (re-check with new proof)
+//         evidence-submitted --evaluation fails--> funded (retry, F4)
+//         evidence-submitted --new proof--> evidence-submitted (resubmission)
 
 export const STATES = {
   CREATED: "created",
@@ -53,12 +55,38 @@ export class Escrow {
     return this.state;
   }
 
+  // State-aware (audit F4): from funded this is the first submission; from
+  // evidence-submitted it is a re-check after a rejected decision or a
+  // failed evaluation, receipted as a resubmission without a state change.
   submitEvidence(evidence) {
-    this._require(STATES.FUNDED, "submit evidence");
-    this.state = STATES.EVIDENCE;
-    this.chain.append("evidence-submitted", {
+    if (this.state === STATES.FUNDED) {
+      this.state = STATES.EVIDENCE;
+      this.chain.append("evidence-submitted", {
+        mandateId: this.mandate.id,
+        evidence,
+      });
+      return this.state;
+    }
+    if (this.state === STATES.EVIDENCE) {
+      this.chain.append("evidence-resubmitted", {
+        mandateId: this.mandate.id,
+        evidence,
+      });
+      return this.state;
+    }
+    throw new Error(
+      `cannot submit evidence from state ${this.state} (needs funded or evidence-submitted)`
+    );
+  }
+
+  // A provider failure during evaluation rolls the order back to funded and
+  // receipts the failure, so a transient error never bricks the order (F4).
+  failEvaluation(error) {
+    this._require(STATES.EVIDENCE, "fail evaluation");
+    this.state = STATES.FUNDED;
+    this.chain.append("evaluation-failed", {
       mandateId: this.mandate.id,
-      evidence,
+      error,
     });
     return this.state;
   }

@@ -34,18 +34,66 @@ function resetState() {
 }
 resetState();
 
+// Demo protection (audit F2/F3): body cap, basic per-IP rate limits on the
+// spend routes, an order capacity cap, and a shared operator token on the
+// state-changing routes (/demo/*, approve, reject). The token gate is active
+// only when DEMO_TOKEN is set; local development without it stays open.
+const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 12 * 1024 * 1024);
+const MAX_ORDERS = Number(process.env.MAX_ORDERS || 200);
+const RATE_ORDERS_PER_MIN = Number(process.env.RATE_LIMIT_ORDERS_PER_MIN || 30);
+const RATE_EVIDENCE_PER_MIN = Number(process.env.RATE_LIMIT_EVIDENCE_PER_MIN || 10);
+const DEMO_TOKEN = process.env.DEMO_TOKEN || "";
+
+const buckets = new Map();
+function rateOk(key, limit, windowMs = 60000) {
+  const now = Date.now();
+  const arr = (buckets.get(key) || []).filter((t) => now - t < windowMs);
+  if (arr.length >= limit) {
+    buckets.set(key, arr);
+    return false;
+  }
+  arr.push(now);
+  buckets.set(key, arr);
+  return true;
+}
+function clientIp(req) {
+  const xff = req.headers["x-forwarded-for"];
+  return (xff ? String(xff).split(",")[0].trim() : "") || req.socket.remoteAddress || "unknown";
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
+    let size = 0;
+    let settled = false;
+    req.on("data", (c) => {
+      if (settled) return; // overflow: keep draining, discard, stay bounded
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        settled = true;
+        const err = new Error("request body too large");
+        err.status = 413;
+        reject(err);
+        req.resume();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => {
+      if (settled) return;
+      settled = true;
       try {
         resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {});
       } catch (e) {
         reject(e);
       }
     });
-    req.on("error", reject);
+    req.on("error", (e) => {
+      if (!settled) {
+        settled = true;
+        reject(e);
+      }
+    });
   });
 }
 
@@ -64,6 +112,13 @@ const server = createServer(async (req, res) => {
   };
   const url = new URL(req.url, "http://localhost");
   const parts = url.pathname.split("/").filter(Boolean);
+  const ip = clientIp(req);
+  const requireToken = () => {
+    if (!DEMO_TOKEN) return true;
+    if (req.headers["x-demo-token"] === DEMO_TOKEN) return true;
+    send(401, { error: "demo operator token required" });
+    return false;
+  };
 
   try {
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
@@ -86,12 +141,14 @@ const server = createServer(async (req, res) => {
     // Demo controls: tamper rewrites a past decision receipt so visitors can
     // watch the chain break; reset restores a clean demo state.
     if (req.method === "POST" && url.pathname === "/demo/tamper") {
+      if (!requireToken()) return;
       const target = [...chain.receipts].reverse().find((r) => r.kind === "decision");
       if (!target) return send(400, { error: "no decision receipt to tamper with yet" });
       target.data.releasePct = target.data.releasePct === 100 ? 55 : 100;
       return send(200, { tamperedSeq: target.seq, verify: chain.verify() });
     }
     if (req.method === "POST" && url.pathname === "/demo/reset") {
+      if (!requireToken()) return;
       resetState();
       return send(200, { ok: true });
     }
@@ -99,6 +156,12 @@ const server = createServer(async (req, res) => {
     // Create an order: mandate written, escrow funded. Demo amounts are
     // synthetic test value only.
     if (req.method === "POST" && url.pathname === "/orders") {
+      if (!rateOk(`orders:${ip}`, RATE_ORDERS_PER_MIN)) {
+        return send(429, { error: "rate limit exceeded" });
+      }
+      if (orders.size >= MAX_ORDERS) {
+        return send(429, { error: "demo order capacity reached" });
+      }
       const body = await readBody(req);
       const id = body.id || `order-${++orderSeq}`;
       if (orders.has(id)) return send(409, { error: `order ${id} exists` });
@@ -129,6 +192,9 @@ const server = createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && parts[2] === "evidence") {
+        if (!rateOk(`evidence:${ip}`, RATE_EVIDENCE_PER_MIN)) {
+          return send(429, { error: "rate limit exceeded" });
+        }
         const body = await readBody(req);
         if (!body.imageDataUri) return send(400, { error: "imageDataUri required" });
         const decision = await evaluateDelivery(escrow, body.imageDataUri);
@@ -136,21 +202,27 @@ const server = createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && parts[2] === "approve") {
+        if (!requireToken()) return;
         const body = await readBody(req);
-        const settlement = await escrow.approve(body.approver || "human-demo");
+        // With a token configured, the recorded approver is the server-side
+        // operator identity, never free text from the request body (F3).
+        const approver = DEMO_TOKEN ? "demo-operator" : body.approver || "human-demo";
+        const settlement = await escrow.approve(approver);
         return send(200, { state: escrow.state, settlement });
       }
 
       if (req.method === "POST" && parts[2] === "reject") {
+        if (!requireToken()) return;
         const body = await readBody(req);
-        escrow.reject(body.rejector || "human-demo", body.reason || "");
+        const rejector = DEMO_TOKEN ? "demo-operator" : body.rejector || "human-demo";
+        escrow.reject(rejector, body.reason || "");
         return send(200, { state: escrow.state });
       }
     }
 
     return send(404, { error: "not found" });
   } catch (err) {
-    return send(500, { error: String(err.message || err) });
+    return send(err.status || 500, { error: String(err.message || err) });
   }
 });
 

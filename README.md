@@ -39,3 +39,10 @@ World), Oct 26 to Nov 4, 2026. Test value only; synthetic data throughout.
 Dockerfile included. On Render: New, Web Service, connect this repo,
 Docker auto-detected, set env vars META_API_KEY and META_API_MODE=standard.
 The key stays server-side; never commit it (.env is gitignored).
+
+Demo protection (from the Oct 27 security audit): request bodies are capped
+(413 over the limit), the order and evidence routes carry basic per-IP rate
+limits, order count is capped, and setting DEMO_TOKEN puts approve, reject,
+and the /demo/* controls behind an operator token header; the presenter
+opens the demo with ?token=<value> in the link. Order and receipt reads
+stay public: the receipt log is the showpiece.

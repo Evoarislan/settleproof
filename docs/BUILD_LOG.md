@@ -71,3 +71,43 @@
   rebuild + boot + health verified locally on the patched runtime; it needs
   only a Render rebuild (Manual Deploy) to pick up the patched base image.
   PHP does not apply to any portfolio app.
+- Oct 27, 2026: LIVE RAIL DONE. src/rail.js settles real USDC on Base from
+  the treasury wallet, env-gated (SETTLEPROOF_RAIL=live), mock stays the
+  default everywhere including the public demo. Demo rate 0.01 disclosed in
+  every settlement receipt with the real amount and tx hash. On-chain
+  proof: order-1 (10/10) tx 0x28258ea75d82a251ce5cdca85d6e00889b485b8df69fc5b03d410f39c40e9560
+  moved 1.2 USDC; order-2 (9/10 partial) tx 0x52fa97337c1a1723849ff2ed1ffc3de524df7c3fd3ab965b5ee9b855298cb150
+  moved 1.08 USDC; demo seller balance 0 -> 2.28 USDC exactly, held shares
+  never left the treasury. Demo seller wallet: 0x4BC04F353D14d4d7F956c13638a031988Edc9330
+  (key outside the repo). Treasury verified on chain the same day:
+  70.95629 USDC and 0.000409 ETH (gas is the constraint, dozens of demo
+  settlements of headroom).
+- Oct 27, 2026: DAMAGED-GOODS SCENARIO DONE (third scenario, full scope).
+  Finding: SAM cannot grade condition (damage concepts segment every box),
+  so Spark vision does the condition check and SAM keeps the count. Live:
+  10 present, 2 damaged -> partial-hold 80 (96 released, 24 held), vision
+  notes localize the damage correctly; clean-delivery regression holds at
+  100 with zero false damage flags.
+- Oct 27, 2026: double-settlement race in approve() closed (synchronous
+  settling state, rollback on rail failure), test 9 covers it. Core tests
+  9/9. A SECURITY-AUDIT.md for a sibling build was committed by accident in
+  e973196 and removed in bf26c23; it remains in git history and in
+  ~/workspace/settleproof-audit/.
+- Oct 27, 2026: SECURITY FIXES F2+F3 and F4 landed (approved by John in the
+  main chat; audit at ~/workspace/settleproof-audit/SECURITY-AUDIT.md).
+  F2: readBody caps at MAX_BODY_BYTES (default 12 MB, 413 on overflow,
+  drain-and-discard so memory stays bounded); per-IP rate limits on
+  POST /orders (30/min) and evidence (10/min) with 429s; order capacity
+  cap (MAX_ORDERS default 200). F3: DEMO_TOKEN env puts /demo/*, approve,
+  and reject behind an x-demo-token header; with a token configured the
+  recorded approver is the server-side "demo-operator", never body text;
+  the UI takes the token from ?token= in the presenter link (session only)
+  and prompts once on a 401. Gate is off when DEMO_TOKEN is unset, so
+  local flows are unchanged (regression-verified live). F4: submitEvidence
+  is state-aware (funded = first submission, evidence-submitted =
+  resubmission, receipted), and a SAM failure receipts evaluation-failed
+  and rolls the order back to funded for retry; reject -> re-evaluate now
+  works as the state machine always documented. Tests: core 11/11 (new
+  tests 10 and 11 cover SAM-failure rollback and reject -> re-evidence)
+  and scripts/server-test.mjs 6/6 against a real booted server in mock
+  mode (body cap, both rate limits, both token gates).

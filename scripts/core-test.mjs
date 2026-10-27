@@ -258,4 +258,62 @@ function newEscrow(chain) {
   console.log("9. double-settle race closed + rail-failure rollback: ok");
 }
 
+// 10. F4: a transient SAM failure rolls back to funded, receipts the
+//     failure, and a retry succeeds. The order is never bricked.
+{
+  const chain = new ReceiptChain();
+  const escrow = newEscrow(chain);
+  let calls = 0;
+  const flaky = {
+    samCount: async () => {
+      calls++;
+      if (calls === 1) throw new Error("sam http 503: upstream unavailable");
+      return { provider: "stub-sam", count: 10, boxes: [] };
+    },
+    sparkChat: async () => ({
+      content: JSON.stringify({ decision: "release", releasePct: 100, reason: "All present." }),
+      usage: null,
+      model: "stub-spark",
+    }),
+  };
+  await assert.rejects(
+    () => evaluateDelivery(escrow, "data:image/png;base64,stub", flaky),
+    /503/
+  );
+  assert.equal(escrow.state, "funded");
+  assert.ok(chain.receipts.some((r) => r.kind === "evaluation-failed"));
+  const decision = await evaluateDelivery(escrow, "data:image/png;base64,stub", flaky);
+  assert.equal(decision.final.decision, "release");
+  const settlement = await escrow.approve("john");
+  assert.equal(settlement.releasedAmount, 120);
+  assert.equal(chain.verify().ok, true);
+  console.log("10. SAM failure rollback + retry: ok");
+}
+
+// 11. F4: reject returns to evidence-submitted, and re-evaluation with new
+//     proof works from there (previously a dead end).
+{
+  const chain = new ReceiptChain();
+  const escrow = newEscrow(chain);
+  await evaluateDelivery(
+    escrow,
+    "data:image/png;base64,stub",
+    stubProviders(9, { decision: "partial-hold", releasePct: 90, reason: "Nine of ten." })
+  );
+  assert.equal(escrow.state, "decided");
+  escrow.reject("john", "recount requested");
+  assert.equal(escrow.state, "evidence-submitted");
+  const second = await evaluateDelivery(
+    escrow,
+    "data:image/png;base64,stub2",
+    stubProviders(10, { decision: "release", releasePct: 100, reason: "All ten on recount." })
+  );
+  assert.equal(second.final.decision, "release");
+  assert.ok(chain.receipts.some((r) => r.kind === "evidence-resubmitted"));
+  const settlement = await escrow.approve("john");
+  assert.equal(settlement.releasedAmount, 120);
+  assert.equal(chain.verify().ok, true);
+  console.log("11. reject -> re-evaluation: ok");
+}
+
 console.log("core tests: all passed");
