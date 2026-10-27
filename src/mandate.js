@@ -31,6 +31,9 @@ export function createMandate({
       zeroEvidenceHolds: true,
       // A human approves before any money settles.
       humanApproval: true,
+      // Visibly damaged items do not count as delivered in good condition;
+      // their share is held like a missing item's share.
+      conditionCheck: true,
     },
   };
 }
@@ -61,6 +64,7 @@ export function mandatePromptText(mandate) {
     `Mandate ${mandate.id}: buyer ${mandate.buyer} paid ${mandate.totalAmount} ${mandate.currency} to seller ${mandate.seller}.`,
     `The order is for ${mandate.expectedCount} units of "${mandate.concept}".`,
     `Release rule: release the percentage of the payment matching the share of items verified present in the delivery photo.`,
+    `Items visibly damaged (crushed, torn, dented, punctured) do not count as delivered in good condition; their share is held the same as a missing item's share.`,
     `If all ${mandate.expectedCount} items are verified, release 100%. If none are verified, or there is no usable evidence, hold 100%.`,
     `A human approves every settlement before money moves.`,
   ].join(" ");

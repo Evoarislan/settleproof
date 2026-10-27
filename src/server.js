@@ -2,8 +2,9 @@ import { createServer } from "node:http";
 import { ReceiptChain } from "./receipts.js";
 import { providerMode } from "./providers.js";
 import { createMandate } from "./mandate.js";
-import { Escrow, mockRail } from "./escrow.js";
+import { Escrow } from "./escrow.js";
 import { evaluateDelivery } from "./engine.js";
+import { selectRail } from "./rail.js";
 
 // Load .env if present (no dependency; tiny parser).
 import { readFileSync, existsSync } from "node:fs";
@@ -17,6 +18,10 @@ if (existsSync(new URL("../.env", import.meta.url))) {
 }
 
 const port = Number(process.env.PORT || 3004);
+
+// Payment rail: mock by default; the live Base USDC rail engages only when
+// SETTLEPROOF_RAIL=live with a treasury key path and seller address set.
+const rail = await selectRail();
 
 let chain;
 let orders;
@@ -47,6 +52,7 @@ function readBody(req) {
 const ASSETS = {
   "real-ten.jpg": "image/jpeg",
   "real-nine.jpg": "image/jpeg",
+  "real-damaged.jpg": "image/jpeg",
   "ten-boxes.png": "image/png",
   "nine-boxes.png": "image/png",
 };
@@ -71,7 +77,7 @@ const server = createServer(async (req, res) => {
       return res.end(data);
     }
     if (req.method === "GET" && url.pathname === "/health") {
-      return send(200, { ok: true, providers: providerMode(), chain: chain.verify() });
+      return send(200, { ok: true, providers: providerMode(), rail: rail.mode || "mock", chain: chain.verify() });
     }
     if (req.method === "GET" && url.pathname === "/receipts") {
       return send(200, { receipts: chain.receipts, verify: chain.verify() });
@@ -105,7 +111,7 @@ const server = createServer(async (req, res) => {
         totalAmount: body.totalAmount,
         currency: body.currency || "USD-TEST",
       });
-      const escrow = new Escrow(mandate, chain, mockRail);
+      const escrow = new Escrow(mandate, chain, rail);
       escrow.fund();
       orders.set(id, escrow);
       return send(201, escrow.snapshot());
@@ -149,5 +155,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`settleproof listening on ${port} (providers: ${providerMode()})`);
+  console.log(`settleproof listening on ${port} (providers: ${providerMode()}, rail: ${rail.mode || "mock"})`);
 });

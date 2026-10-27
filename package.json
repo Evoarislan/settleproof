@@ -7,5 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "selftest": "node scripts/selftest.mjs"
+  },
+  "dependencies": {
+    "viem": "^2.57.12"
   }
 }

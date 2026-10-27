@@ -133,4 +133,69 @@ function newEscrow(chain) {
   console.log("6. over-count cap + flag: ok");
 }
 
+// 7. Rail seam contract: approval calls settle exactly once with the release
+//    amount, and rail metadata lands in the settlement and the receipt.
+{
+  const chain = new ReceiptChain();
+  const mandate = createMandate({
+    id: "order-railtest",
+    buyer: "buyer-demo",
+    seller: "seller-demo",
+    concept: "box",
+    expectedCount: 10,
+    totalAmount: 120,
+  });
+  const calls = [];
+  const capturingRail = {
+    mode: "live",
+    async settle(args) {
+      calls.push(args);
+      return { txRef: "0xdeadbeef", usdcAmount: 1.08, rate: 0.01, chain: "base" };
+    },
+  };
+  const escrow = new Escrow(mandate, chain, capturingRail);
+  escrow.fund();
+  await evaluateDelivery(
+    escrow,
+    "data:image/png;base64,stub",
+    stubProviders(9, { decision: "partial-hold", releasePct: 90, reason: "Nine of ten." })
+  );
+  const settlement = await escrow.approve("john");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].amount, 108);
+  assert.equal(settlement.txRef, "0xdeadbeef");
+  assert.equal(settlement.rail.usdcAmount, 1.08);
+  const receipt = chain.receipts.find((r) => r.kind === "approved-and-settled");
+  assert.equal(receipt.data.rail.chain, "base");
+  assert.equal(chain.verify().ok, true);
+  console.log("7. rail seam + metadata in receipt: ok");
+}
+
+// 8. Damaged goods: 10 present, 2 damaged -> 8 good -> partial-hold 80.
+{
+  const chain = new ReceiptChain();
+  const escrow = newEscrow(chain);
+  const providers = {
+    ...stubProviders(10, { decision: "partial-hold", releasePct: 80, reason: "Two damaged." }),
+    sparkCondition: async () => ({
+      provider: "stub-vision",
+      damagedCount: 2,
+      totalVisible: 10,
+      notes: "Two crushed.",
+    }),
+  };
+  const decision = await evaluateDelivery(escrow, "data:image/png;base64,stub", providers);
+  assert.equal(decision.samCount, 10);
+  assert.equal(decision.damagedCount, 2);
+  assert.equal(decision.effectiveCount, 8);
+  assert.equal(decision.final.decision, "partial-hold");
+  assert.equal(decision.final.releasePct, 80);
+  assert.equal(decision.final.releaseAmount, 96);
+  assert.equal(decision.final.heldAmount, 24);
+  const receipt = chain.receipts.find((r) => r.kind === "decision");
+  assert.equal(receipt.data.damagedCount, 2);
+  assert.equal(receipt.data.conditionSource, "stub-vision");
+  console.log("8. damaged goods condition path: ok");
+}
+
 console.log("core tests: all passed");

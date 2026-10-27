@@ -39,6 +39,47 @@ export async function sparkChat(messages, { maxTokens = 1200 } = {}) {
   };
 }
 
+// Muse Spark condition check (vision). SAM counts items but cannot grade
+// their condition from a text concept (verified Oct 27, 2026: damage prompts
+// segment every box). Spark reads the photo and reports how many items are
+// visibly damaged, with locations. The engine treats this as an assessment
+// input to the deterministic band, disclosed as spark-vision in receipts.
+export async function sparkCondition(imageDataUri) {
+  if (!hasKey()) {
+    return { provider: "mock-spark-vision", damagedCount: 0, totalVisible: null, notes: "mock condition check" };
+  }
+  const out = await sparkChat([
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "This is a delivery photo of items inside a shipping carton. Count how many of the items are visibly damaged (crushed, torn, dented, punctured, or soaked). Reply with a JSON object only: {\"damagedCount\": number, \"totalVisible\": number, \"notes\": string}. No other text.",
+        },
+        { type: "image_url", image_url: { url: imageDataUri } },
+      ],
+    },
+  ]);
+  let parsed = null;
+  try {
+    parsed = JSON.parse(out.content);
+  } catch {
+    const s = out.content?.indexOf("{");
+    const e = out.content?.lastIndexOf("}");
+    if (s >= 0 && e > s) {
+      try {
+        parsed = JSON.parse(out.content.slice(s, e + 1));
+      } catch {
+        parsed = null;
+      }
+    }
+  }
+  if (!parsed || typeof parsed.damagedCount !== "number") {
+    throw new Error("spark condition check returned no usable JSON");
+  }
+  return { provider: "muse-spark-1.3-vision", ...parsed };
+}
+
 export async function sparkDecide(input) {
   if (!hasKey()) {
     return {

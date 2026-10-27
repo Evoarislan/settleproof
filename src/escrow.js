@@ -73,6 +73,9 @@ export class Escrow {
       releaseAmount: decision.final.releaseAmount,
       heldAmount: decision.final.heldAmount,
       samCount: decision.samCount,
+      damagedCount: decision.damagedCount ?? 0,
+      effectiveCount: decision.effectiveCount ?? decision.samCount,
+      conditionSource: decision.condition ? decision.condition.provider : null,
       overCount: decision.overCount ?? 0,
       expectedCount: this.mandate.expectedCount,
       sparkProposed: decision.spark?.decision ?? null,
@@ -88,6 +91,7 @@ export class Escrow {
     this._require(STATES.DECIDED, "approve");
     const { releaseAmount, heldAmount, decision } = this.decision.final;
     let txRef = null;
+    let railMeta = null;
     if (releaseAmount > 0) {
       const out = await this.rail.settle({
         amount: releaseAmount,
@@ -96,8 +100,10 @@ export class Escrow {
         memo: `settleproof ${this.mandate.id} release ${decision}`,
       });
       txRef = out.txRef;
+      const { txRef: _omit, ...rest } = out;
+      railMeta = Object.keys(rest).length ? rest : null;
     }
-    this.settlement = { releasedAmount: releaseAmount, heldAmount, txRef, approver };
+    this.settlement = { releasedAmount: releaseAmount, heldAmount, txRef, rail: railMeta, approver };
     this.state = decision === "hold" ? STATES.HELD : STATES.SETTLED;
     this.chain.append("approved-and-settled", {
       mandateId: this.mandate.id,
@@ -105,6 +111,7 @@ export class Escrow {
       releasedAmount: releaseAmount,
       heldAmount,
       txRef,
+      rail: railMeta,
       outcome: this.state,
     });
     return this.settlement;

@@ -98,6 +98,8 @@
       <small>The seller ships all 10 boxes. Expect a full release.</small></button>
     <button class="scenario" data-asset="real-nine.jpg">Short shipment
       <small>One box is missing from the photo. Expect 90% released, 10% held.</small></button>
+    <button class="scenario" data-asset="real-damaged.jpg">Damaged goods
+      <small>All 10 shipped, but 2 arrived crushed. SAM counts them present; the Spark condition check grades the damage. Expect 80% released, 20% held.</small></button>
     <button class="scenario" id="uploadBtn">Upload a delivery photo
       <small>Your own photo. SAM counts the white product boxes it finds.</small></button>
     <input type="file" id="fileInput" accept="image/*" style="display:none">
@@ -212,7 +214,11 @@ function drawOverlay(boxes) {
 function renderDecision(decision) {
   currentDecision = decision;
   const f = decision.final;
-  $("countBig").textContent = decision.samCount + " / 10";
+  const shown = decision.effectiveCount ?? decision.samCount;
+  $("countBig").textContent = shown + " / 10";
+  if (decision.damagedCount > 0) {
+    $("countBig").textContent = shown + " / 10 good";
+  }
   $("barRel").style.width = f.releasePct + "%";
   $("barRel").textContent = f.releasePct > 12 ? "$" + f.releaseAmount.toFixed(2) : "";
   $("barHeld").style.width = (100 - f.releasePct) + "%";
@@ -223,6 +229,7 @@ function renderDecision(decision) {
   $("decisionBody").innerHTML =
     '<span class="badge ' + f.decision + '">' + badgeText + "</span>" +
     '<div class="explain">' + decision.explanation + "</div>" +
+    (decision.damagedCount > 0 ? '<p style="font-size:13px;color:var(--muted);">Condition check (Spark vision): ' + decision.damagedCount + ' of ' + decision.samCount + ' present items visibly damaged' + (decision.condition && decision.condition.notes ? ' — ' + decision.condition.notes : '') + '. Damaged items are held like missing ones, per the mandate.</p>' : "") +
     (decision.overCount > 0 ? '<div class="override" style="color:#b97a00;">Over-count flagged: SAM found ' + decision.samCount + ' items against a mandate of 10. Release capped at 100% and the surplus is recorded in the receipts for the approver.</div>' : "") +
     (decision.engineOverride ? '<div class="override">The language model proposed a different outcome. The verified SAM count overruled it, and the override is in the receipts.</div>' : "") +
     '<p style="font-size:13px;color:var(--muted);">Decided by the mandate band from the SAM 3.1 count, explained by Muse Spark. Awaiting human approval.</p>';

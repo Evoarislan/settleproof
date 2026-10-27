@@ -43,7 +43,24 @@ export async function evaluateDelivery(escrow, imageDataUri, providers = livePro
   });
 
   const sam = await providers.samCount(imageDataUri, mandate.concept);
-  const band = releaseBand(mandate, sam.count);
+
+  // Condition check: SAM counts presence but cannot grade condition from a
+  // text concept, so Spark vision assesses damage. Its damaged count feeds
+  // the same deterministic band; the source is disclosed in the receipt.
+  let condition = null;
+  let damagedCount = 0;
+  let conditionError = null;
+  if (mandate.clauses.conditionCheck && typeof providers.sparkCondition === "function") {
+    try {
+      condition = await providers.sparkCondition(imageDataUri);
+      damagedCount = Math.max(0, Math.min(condition.damagedCount || 0, sam.count ?? 0));
+    } catch (err) {
+      conditionError = String(err).slice(0, 200);
+    }
+  }
+  const effectiveCount = Math.max(0, (sam.count ?? 0) - damagedCount);
+  const band = releaseBand(mandate, effectiveCount);
+
   // Over-count sanity flag: more items segmented than the mandate expects
   // (a loose concept phrase can catch the shipping carton too). The band
   // already caps the release at 100%; the flag makes the surplus visible
@@ -55,7 +72,7 @@ export async function evaluateDelivery(escrow, imageDataUri, providers = livePro
   if (typeof providers.sparkChat === "function") {
     const prompt = [
       mandatePromptText(mandate),
-      `Evidence: a segmentation count verified ${sam.count} of ${mandate.expectedCount} items present in the delivery photo.`,
+      `Evidence: a segmentation count verified ${sam.count} of ${mandate.expectedCount} items present in the delivery photo${damagedCount > 0 ? `; a vision condition check found ${damagedCount} of them visibly damaged, so ${effectiveCount} count as delivered in good condition` : ""}.`,
       `Reply with a JSON object only: {"decision": "release"|"partial-hold"|"hold", "releasePct": number, "reason": string}. No other text.`,
     ].join(" ");
     try {
@@ -70,10 +87,10 @@ export async function evaluateDelivery(escrow, imageDataUri, providers = livePro
   if (!explanation) {
     explanation =
       band.decision === "release"
-        ? `All ${mandate.expectedCount} items verified present. Full release per mandate.`
+        ? `All ${mandate.expectedCount} items verified present in good condition. Full release per mandate.`
         : band.decision === "partial-hold"
-          ? `${sam.count} of ${mandate.expectedCount} items verified present. Release ${band.releasePct}% and hold the rest per mandate.`
-          : `Only ${sam.count ?? 0} of ${mandate.expectedCount} items verified. Hold everything per mandate.`;
+          ? `${effectiveCount} of ${mandate.expectedCount} items count as delivered in good condition (${sam.count} present${damagedCount > 0 ? `, ${damagedCount} damaged` : ""}). Release ${band.releasePct}% and hold the rest per mandate.`
+          : `Only ${effectiveCount} of ${mandate.expectedCount} items count as delivered in good condition. Hold everything per mandate.`;
   }
 
   const engineOverride = Boolean(
@@ -95,6 +112,10 @@ export async function evaluateDelivery(escrow, imageDataUri, providers = livePro
     samCount: sam.count,
     samBoxes: sam.boxes || [],
     samProvider: sam.provider,
+    damagedCount,
+    effectiveCount,
+    condition,
+    conditionError,
     overCount,
     band,
     spark: spark && !spark.error ? spark : null,

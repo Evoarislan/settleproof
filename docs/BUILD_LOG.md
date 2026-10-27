@@ -54,3 +54,20 @@
   explanation, in the UI, and in the decision receipt (overCount field).
   Core tests now 6/6 including the over-count case; live flow on the v2
   asset re-verified (9 -> partial-hold 90, no false flag).
+- Repo published Oct 26, 2026: https://github.com/Evoarislan/settleproof
+  (public, main @ aceb583). Pre-push checks: .env gitignored and not staged,
+  secret scan clean (only .env.example placeholder in the tree). Dockerfile
+  added (node:20-alpine; Render auto-detect pattern proven by Common Ground).
+  Render service creation is John's dashboard step (his account), with
+  META_API_KEY set server-side there.
+- Oct 26, 2026: Airwallex Bank of Agents was NOT shortlisted. Per the standing
+  Meta-vs-Airwallex decision rule, SettleProof is now the main build at FULL
+  scope: the scoped-sprint cut list is retired and the third demo scenario
+  (damaged goods) is restored alongside clean delivery and short shipment.
+- Oct 27, 2026: Render security advisory (eMudhra CA compromise, Node.js Oct 21
+  patches, PHP2Shell). SettleProof Dockerfile bumped node:20-alpine ->
+  node:24-alpine (patched line; app already verified on Node 24.22.1) and
+  pushed (main). Common Ground checked the same day: already on node:24-slim,
+  rebuild + boot + health verified locally on the patched runtime; it needs
+  only a Render rebuild (Manual Deploy) to pick up the patched base image.
+  PHP does not apply to any portfolio app.
