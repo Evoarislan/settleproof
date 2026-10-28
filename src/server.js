@@ -166,6 +166,17 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/diag") {
       if (!requireToken()) return;
       const out = { providers: providerMode() };
+      // Fingerprint of the key this deployment actually holds (length +
+      // sha256 prefix). Lets the operator confirm the stored value matches
+      // the known-good key without ever printing it.
+      try {
+        const { createHash } = await import("node:crypto");
+        const k = process.env.META_API_KEY || "";
+        out.keyInfo = {
+          length: k.length,
+          sha256Prefix: createHash("sha256").update(k).digest("hex").slice(0, 10),
+        };
+      } catch { /* keyInfo is best-effort */ }
       try {
         const r = await fetch("https://api.meta.ai/v1/models", {
           headers: { Authorization: `Bearer ${process.env.META_API_KEY}` },
