@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { ReceiptChain } from "./receipts.js";
-import { providerMode } from "./providers.js";
+import { providerMode, samCount, sparkChat } from "./providers.js";
 import { createMandate } from "./mandate.js";
 import { Escrow } from "./escrow.js";
 import { evaluateDelivery } from "./engine.js";
@@ -157,6 +157,42 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/receipts") {
       return send(200, { receipts: chain.receipts, verify: chain.verify() });
+    }
+
+    // Operator diagnostic (token-gated): reports what THIS deployment can
+    // see and reach at the provider: the model catalog for its key, and
+    // whether the SAM and Spark calls succeed from this network origin.
+    // Only HTTP status codes are reported, never upstream bodies (F8).
+    if (req.method === "POST" && url.pathname === "/diag") {
+      if (!requireToken()) return;
+      const out = { providers: providerMode() };
+      try {
+        const r = await fetch("https://api.meta.ai/v1/models", {
+          headers: { Authorization: `Bearer ${process.env.META_API_KEY}` },
+        });
+        out.modelsStatus = r.status;
+        const j = await r.json().catch(() => null);
+        out.models = (j?.data || []).map((x) => x.id);
+      } catch (e) {
+        out.modelsError = String(e).slice(0, 120);
+      }
+      const tinyPng =
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+      try {
+        const sam = await samCount(tinyPng, "box");
+        out.sam = { ok: true, count: sam.count, provider: sam.provider };
+      } catch (e) {
+        const m = /http (\d+)/.exec(String(e));
+        out.sam = { ok: false, status: m ? Number(m[1]) : null };
+      }
+      try {
+        const s = await sparkChat([{ role: "user", content: "Reply with the single word: ok" }]);
+        out.spark = { ok: Boolean(s?.content), model: s?.model || null };
+      } catch (e) {
+        const m = /http (\d+)/.exec(String(e));
+        out.spark = { ok: false, status: m ? Number(m[1]) : null };
+      }
+      return send(200, out);
     }
 
     // Demo controls: tamper rewrites a past decision receipt so visitors can
