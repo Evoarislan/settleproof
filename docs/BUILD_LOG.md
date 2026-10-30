@@ -149,3 +149,8 @@
   removal: core 13/13, server 8/8, selftest pass. Submission is
   video-led with the Codespace as a bonus link. No feature changes
   after this commit; fixes only, with John's go.
+- Oct 30, 2026 (freeze fix, John's go): --red changed #d64545 -> #cc3a3a
+  in the UI. The old value computed 4.38:1 contrast on white, just under
+  WCAG AA 4.5 for the danger buttons and the held-money bar text; the
+  new value computes 4.96:1 and is visually near-identical. One CSS
+  variable, nothing else touched. Server tests + selftest pass.
