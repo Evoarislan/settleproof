@@ -141,3 +141,11 @@
   selftest pass, live regression green (damaged flow exact, reject ->
   re-check decides live). Deferred by design: post-settlement held-
   remainder top-up flow and persistence-lite (noted for post-freeze).
+- Oct 30, 2026 (FEATURE FREEZE): removed the /diag operator probe and its
+  now-unused provider imports. The probe existed only to diagnose the
+  Render deployment (it proved Meta serves Render an empty model
+  catalog); the judged demo runs on GitHub Codespaces, verified end to
+  end Oct 29, so the probe is scaffolding, not product. Tests after
+  removal: core 13/13, server 8/8, selftest pass. Submission is
+  video-led with the Codespace as a bonus link. No feature changes
+  after this commit; fixes only, with John's go.
