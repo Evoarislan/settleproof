@@ -13,6 +13,17 @@ anyone can click, challenge, and re-run.
 Built for the Meta Global AI Developer Hackathon (Indie track, Build for Your
 World), Oct 26 to Nov 4, 2026. Test value only; synthetic data throughout.
 
+## Live demo
+
+The judged demo runs in a GitHub Codespace:
+https://possessed-superstition-975pw9vvwxqp2747g-3004.app.github.dev/
+Codespaces sleep when idle and only the owner can wake them, so the
+submission leads with the demo video; the live instance is a bonus for
+anyone who catches it awake. The public demo settles on the mock rail by
+design (no treasury key ever sits on a public host). The live rail is
+real and verified: the same code settled 1.2 USDC and 1.08 USDC on Base
+mainnet on Oct 27, 2026 (tx hashes in docs/BUILD_LOG.md).
+
 ## Run
 
     npm start          # plain HTTP server on PORT (default 3004)
@@ -36,9 +47,16 @@ World), Oct 26 to Nov 4, 2026. Test value only; synthetic data throughout.
 
 ## Deploy
 
-Dockerfile included. On Render: New, Web Service, connect this repo,
-Docker auto-detected, set env vars META_API_KEY and META_API_MODE=standard.
-The key stays server-side; never commit it (.env is gitignored).
+Any host that runs the Dockerfile or plain Node works for the app itself:
+set env vars META_API_KEY and META_API_MODE=standard (PORT is assigned by
+the host). The key stays server-side; never commit it (.env is gitignored).
+One observed caveat: from Render's network, Meta's API returned an empty
+model catalog for this account (every model 404, including SAM 3.1), so
+photo checks fail there while the identical build and key work from home,
+cloud VMs, and GitHub Codespaces. The demo therefore runs on Codespaces.
+If you deploy elsewhere and evidence calls return 502 with a
+model_not_found provider error, suspect the host's network origin before
+suspecting the key.
 
 Demo protection (from the Oct 27 security audit): request bodies are capped
 (413 over the limit), the order and evidence routes carry basic per-IP rate
